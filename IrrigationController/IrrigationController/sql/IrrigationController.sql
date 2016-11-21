@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS `IrrigationController`.`ControllerStatus` (
   `Station10Relay` TINYINT(1) NULL,
   `Station11Relay` TINYINT(1) NULL,
   `Station12Relay` TINYINT(1) NULL,
+  `Pressure` INT(11) NULL,
   PRIMARY KEY (`Id`))
 ENGINE = InnoDB;
 

@@ -307,7 +307,7 @@ namespace IrrigationController
         }
         public void CreateEvent(EventType eventType, string desc)
         {
-            string sql = string.Format("INSERT INTO EventHistory (TStamp, EventType, Description) values (CURRENT_TIMESTAMP(), {0}, '{1}')", (int)eventType, desc);
+            string sql = string.Format("INSERT INTO EventHistory (TimeStamp, EventType, Description) values (CURRENT_TIMESTAMP(), {0}, '{1}')", (int)eventType, desc);
             log.Debug(sql);
             using (MySqlConnection conn = new MySqlConnection(ConfigurationManager.ConnectionStrings["IrrigationController"].ToString()))
             {
@@ -379,7 +379,7 @@ namespace IrrigationController
         }
         public void RecordStatus()
         {
-            string sql = string.Format("UPDATE ControllerStatus set State = '{0}', Mode = '{1}', TStamp = now(), LowPressureFault = {2}, HighPressureFault = {3}, LowWellFault = {4}, OverloadFault = {5}, ResetRelay = {6}, Station1Relay = {7}, Station2Relay = {8}, Station3Relay = {9}, Station4Relay = {10}, Station5Relay = {11}, Station6Relay = {12}, Station7Relay = {13}, Station8Relay = {14}, Station9Relay = {15}, Station10Relay = {16}, Station11Relay = {17}, Station12Relay = {18}, Pressure = {19}",
+            string sql = string.Format("UPDATE ControllerStatus set State = '{0}', Mode = '{1}', TimeStamp = now(), LowPressureFault = {2}, HighPressureFault = {3}, LowWellFault = {4}, OverloadFault = {5}, ResetRelay = {6}, Station1Relay = {7}, Station2Relay = {8}, Station3Relay = {9}, Station4Relay = {10}, Station5Relay = {11}, Station6Relay = {12}, Station7Relay = {13}, Station8Relay = {14}, Station9Relay = {15}, Station10Relay = {16}, Station11Relay = {17}, Station12Relay = {18}, Pressure = {19}",
                 state.ToString(),
                 "Monitoring",
                 LowPressureFault,
