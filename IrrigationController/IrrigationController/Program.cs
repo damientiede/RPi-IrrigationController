@@ -10,6 +10,9 @@ namespace IrrigationController
     {
         static void Main(string[] args)
         {
+            RPiIrrigationController ctrl = new RPiIrrigationController();
+            ctrl.Monitor();
+
         }
     }
 }

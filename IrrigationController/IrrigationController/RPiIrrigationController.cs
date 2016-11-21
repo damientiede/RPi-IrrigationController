@@ -36,6 +36,9 @@ namespace IrrigationController
         const ConnectorPin OverloadFaultInputPin = ConnectorPin.P1Pin18;
         const ConnectorPin PushButtonInputPin = ConnectorPin.P1Pin10;
 
+        //Analog input
+        int Pressure;
+
         //Outputs
         const ConnectorPin Station1OutputPin = ConnectorPin.P1Pin15;
         const ConnectorPin Station2OutputPin = ConnectorPin.P1Pin37;
@@ -117,6 +120,10 @@ namespace IrrigationController
         public State state;
         private int TimeoutDelaySeconds;   //timeout delay before reset in seconds
 
+        public ElectricPotential volts = ElectricPotential.FromVolts(0);
+        public ElectricPotential referenceVoltage = ElectricPotential.FromVolts(3.3);
+        public IInputAnalogPin spiInput;
+
         protected List<IrrigationControllerCommand> Commands;
 
         public RPiIrrigationController()
@@ -128,9 +135,9 @@ namespace IrrigationController
         public void Init()
         {
             log4net.Config.XmlConfigurator.Configure();
-            log = LogManager.GetLogger("Monitor");
-            Log("IrrigationMonitor start");
-            CreateEvent(EventType.ApplicationEvent, "PiSharpMonitor started");
+            log = LogManager.GetLogger("Controller");
+            Log("IrrigationController start");
+            CreateEvent(EventType.ApplicationEvent, "RPiIrrigationController started");
 
             state = State.Monitor;
             TimeoutDelaySeconds = Convert.ToInt32(ConfigurationManager.AppSettings["TimeoutDelaySeconds"]);            
@@ -171,7 +178,7 @@ namespace IrrigationController
             {
                 Console.WriteLine("HighPressureFaultInput {0}", b ? "on" : "off");
                 bHighPressureFaultState = b;
-                CreateEvent(EventType.IOEvent, string.Format("Input {0} on", HighPressureFaultInputPin.ToString()));
+                CreateEvent(EventType.IOEvent, string.Format("Input {0} {1}", HighPressureFaultInputPin.ToString(), b ? "on" : "off"));
                 CreateEvent(EventType.FaultEvent, string.Format("High pressure fault {0}",b ? "detected":"cleared"));
             }));
 
@@ -179,6 +186,18 @@ namespace IrrigationController
             {
                 Console.WriteLine("LowWellFaultInput {0}", b ? "on" : "off");
                 bLowWellFaultState = b;
+                CreateEvent(EventType.IOEvent, string.Format("Input {0} {1}", LowWellFaultInputPin.ToString(), b ? "on" : "off"));
+                CreateEvent(EventType.FaultEvent, string.Format("Low well fault {0}", b ? "detected" : "cleared"));
+                if (b)
+                {
+                    dtFaultStartDate = DateTime.Now;
+                    Log(string.Format("Initializing timeout at {0}", dtFaultStartDate.ToString()));
+                    ChangeState(State.WaitForTimeout);
+                }
+                else
+                {
+                    ChangeState(State.Monitor);
+                }
             }));
 
             connection.Add(OverloadFaultInputPin.Input().OnStatusChanged(b =>
@@ -187,7 +206,7 @@ namespace IrrigationController
                 bOverloadFaultState = b;
             }));
 
-            ElectricPotential referenceVoltage = ElectricPotential.FromVolts(3.3);
+            //ElectricPotential referenceVoltage = ElectricPotential.FromVolts(3.3);
 
             var driver = new MemoryGpioConnectionDriver(); //GpioConnectionSettings.DefaultDriver;
 
@@ -196,16 +215,21 @@ namespace IrrigationController
                 driver.Out(adcCs),
                 driver.In(adcMiso),
                 driver.Out(adcMosi));
-
-            IInputAnalogPin inputPin = spi.In(Mcp3008Channel.Channel0);
+             
+            spiInput = spi.In(Mcp3008Channel.Channel0);
 
             connection.Open();
-            ElectricPotential volts = ElectricPotential.FromVolts(0);
         }
         public void Monitor()
         {
             while (!bShutdown)
             {
+                //process pending command from CommandHistory
+                ProcessCommand();
+
+                //get SPI reading
+                ReadSPI();
+
                 switch (state)
                 {
                     case State.Monitor:
@@ -243,12 +267,6 @@ namespace IrrigationController
                     default:
                         break;
                 }
-                //check inputs
-                CheckInputs();
-
-                //process pending command from CommandHistory
-                ProcessCommand();
-
 
                 if (DateTime.Now > (dtLastStatusUpdate.AddMinutes(MinUpdateIntervalMinutes)))
                 {
@@ -257,164 +275,17 @@ namespace IrrigationController
                 }
                 Thread.Sleep(100);
             }
-        }
-        //public void SetResetButton(bool val)
-        //{
-        //    Log(string.Format("SetResetButton {0}", val == true ? "On" : "Off"));
-        //    CreateEvent(EventType.IOEvent, string.Format("Output 6 {0}", val == true ? "On" : "Off"));
-        //    LibGpio.Gpio.OutputValue(BroadcomPinNumber.Six, val);
-        //    bResetRelayState = val;   
-        //}
-        //public bool ReadPinState(BroadcomPinNumber pin)
-        //{
-        //    return (LibGpio.Gpio.ReadValue(pin) == true);
-        //}
-
-        public void CheckInputs()
-        {
-            //Check low pressure fault input
-            bool bState = LowPressureFault;
-            if (bState)
+        }        
+        
+        public void ReadSPI()
+        {            
+            var v = referenceVoltage * (double)spiInput.Read().Relative;
+            Pressure = Convert.ToInt32(v.Millivolts);
+            if ((Math.Abs(v.Millivolts - volts.Millivolts) > 100))
             {
-                if (!bLowPressureFaultState)
-                {
-                    bLowPressureFaultState = true;
-                    Log("Low pressure fault detected!");
-                    CreateEvent(EventType.IOEvent, string.Format("Input {0} on", LowPressureFaultInput.ToString()));
-                    CreateEvent(EventType.FaultEvent, "Low pressure fault detected");
-                }
-            }
-            else
-            {
-                if (bLowPressureFaultState)
-                {
-                    bLowPressureFaultState = false;
-                    Log("Low pressure fault cleared!");
-                    CreateEvent(EventType.IOEvent, string.Format("Input {0} off", LowPressureFaultInput.ToString()));
-                    CreateEvent(EventType.FaultEvent, "Low pressure fault cleared");
-                }
-            }
-            //if (LowPressureFault)
-            //{
-            //    if (bLowPressureFaultState != true) {
-            //        Log("Low pressure fault detected!");
-            //    }
-            //    Log("Low pressure fault detected!");
-            //    CreateEvent(EventType.IOEvent, string.Format("Input {0} on",LowPressureFaultInput.ToString()));
-            //    CreateEvent(EventType.FaultEvent, "Low pressure fault detected");
-            //    ChangeState(State.WaitForReset);
-            //}
-            //Check high pressure fault input   
-            bState = HighPressureFault;
-            if (bState)
-            {
-                if (!bHighPressureFaultState)
-                {
-                    bHighPressureFaultState = true;
-                    Log("High pressure fault detected!");
-                    CreateEvent(EventType.IOEvent, string.Format("Input {0} on", HighPressureFaultInput.ToString()));
-                    CreateEvent(EventType.FaultEvent, "High pressure fault detected");
-                }
-            }
-            else
-            {
-                if (bHighPressureFaultState)
-                {
-                    bHighPressureFaultState = false;
-                    Log("High pressure fault cleared!");
-                    CreateEvent(EventType.IOEvent, string.Format("Input {0} off", HighPressureFaultInput.ToString()));
-                    CreateEvent(EventType.FaultEvent, "High pressure fault cleared");
-                }
-            }
-            //if (HighPressureFault)
-            //{
-            //    Log("High pressure fault detected!");
-            //    CreateEvent(EventType.IOEvent, string.Format("Input {0} on",HighPressureFaultInput.ToString()));
-            //    CreateEvent(EventType.FaultEvent, "High pressure fault detected");
-            //    ChangeState(State.WaitForReset);
-            //}
-            //Check low well fault input
-            bState = LowWellFault;
-            if (bState)
-            {
-                if (!bLowWellFaultState)
-                {
-                    bLowWellFaultState = true;
-                    Log("Low well fault detected!");
-                    CreateEvent(EventType.IOEvent, string.Format("Input {0} on", LowWellFaultInput.ToString()));
-                    CreateEvent(EventType.FaultEvent, "Low well fault detected");
-                    dtFaultStartDate = DateTime.Now;
-                    Log(string.Format("Initializing timeout at {0}", dtFaultStartDate.ToString()));
-                    ChangeState(State.WaitForTimeout);
-                }
-            }
-            else
-            {
-                if (bLowWellFaultState)
-                {
-                    bLowWellFaultState = false;
-                    Log("Low well fault cleared!");
-                    CreateEvent(EventType.IOEvent, string.Format("Input {0} off", LowWellFaultInput.ToString()));
-                    CreateEvent(EventType.FaultEvent, "Low well fault cleared");
-                    //ChangeState(State.Monitor);
-                }
-            }
-            //if (LowWellFault)
-            //{
-            //    Log("Low well fault detected!");
-            //    CreateEvent(EventType.IOEvent, string.Format("Input {0} on",LowWellFaultInput.ToString()));
-            //    CreateEvent(EventType.FaultEvent, "Low well fault detected");
-            //    dtFaultStartDate = DateTime.Now;
-            //    Log(string.Format("Initializing timeout at {0}",dtFaultStartDate.ToString()));
-            //    ChangeState(State.WaitForTimeout);
-            //}
-            //Check overload fault input
-            bState = OverloadFault;
-            if (bState)
-            {
-                if (!bOverloadFaultState)
-                {
-                    bOverloadFaultState = true;
-                    Log("Overload fault detected!");
-                    CreateEvent(EventType.IOEvent, string.Format("Input {0} on", OverloadFaultInput.ToString()));
-                    CreateEvent(EventType.FaultEvent, "Overload fault detected");
-                }
-            }
-            else
-            {
-                if (bOverloadFaultState)
-                {
-                    bOverloadFaultState = false;
-                    Log("Overload fault cleared!");
-                    CreateEvent(EventType.IOEvent, string.Format("Input {0} off", OverloadFaultInput.ToString()));
-                    CreateEvent(EventType.FaultEvent, "Overload fault cleared");
-                }
-            }
-            //if (OverloadFault)
-            //{
-            //    Log("Overload fault detected!");
-            //    CreateEvent(EventType.IOEvent, string.Format("Input {0} on",OverloadFaultInput.ToString()));
-            //    CreateEvent(EventType.FaultEvent, "Overload fault detected");
-            //    ChangeState(State.WaitForReset);
-            //}
-            bState = PushButtonPressed;
-            if (bState)
-            {
-                if (!bPushButtonPressedState)
-                {
-                    bPushButtonPressedState = true;
-                    Log("Pushbutton pressed!");
-                    CreateEvent(EventType.IOEvent, string.Format("Input {0} on", PushButtonInput.ToString()));
-                }
-            }
-            else
-            {
-                if (bPushButtonPressedState)
-                {
-                    bPushButtonPressedState = false;
-                    Log("Pushbutton released!");
-                    CreateEvent(EventType.IOEvent, string.Format("Input {0} off", PushButtonInput.ToString()));
-                }
+                volts = ElectricPotential.FromMillivolts(v.Millivolts);
+                Console.WriteLine("Pressure: {0}", Pressure);
+                CreateEvent(EventType.IOEvent, string.Format("Pressure change {0}", Pressure));
             }
         }
         public bool InFaultState()
@@ -436,7 +307,7 @@ namespace IrrigationController
         }
         public void CreateEvent(EventType eventType, string desc)
         {
-            string sql = string.Format("INSERT INTO EventHistory (TimeStamp, EventType, Description) values (CURRENT_TIMESTAMP(), {0}, '{1}')", (int)eventType, desc);
+            string sql = string.Format("INSERT INTO EventHistory (TStamp, EventType, Description) values (CURRENT_TIMESTAMP(), {0}, '{1}')", (int)eventType, desc);
             log.Debug(sql);
             using (MySqlConnection conn = new MySqlConnection(ConfigurationManager.ConnectionStrings["IrrigationController"].ToString()))
             {
@@ -508,7 +379,7 @@ namespace IrrigationController
         }
         public void RecordStatus()
         {
-            string sql = string.Format("UPDATE ControllerStatus set State = '{0}', Mode = '{1}', TimeStamp = now(), LowPressureFault = {2}, HighPressureFault = {3}, LowWellFault = {4}, OverloadFault = {5}, ResetRelay = {6}, Station1Relay = {7}, Station2Relay = {8}, Station3Relay = {9}, Station4Relay = {10}, Station5Relay = {11}, Station6Relay = {12}, Station7Relay = {13}, Station8Relay = {14}, Station9Relay = {15}, Station10Relay = {16}, Station11Relay = {17}, Station12Relay = {18}",
+            string sql = string.Format("UPDATE ControllerStatus set State = '{0}', Mode = '{1}', TStamp = now(), LowPressureFault = {2}, HighPressureFault = {3}, LowWellFault = {4}, OverloadFault = {5}, ResetRelay = {6}, Station1Relay = {7}, Station2Relay = {8}, Station3Relay = {9}, Station4Relay = {10}, Station5Relay = {11}, Station6Relay = {12}, Station7Relay = {13}, Station8Relay = {14}, Station9Relay = {15}, Station10Relay = {16}, Station11Relay = {17}, Station12Relay = {18}, Pressure = {19}",
                 state.ToString(),
                 "Monitoring",
                 LowPressureFault,
@@ -527,7 +398,8 @@ namespace IrrigationController
                 false,
                 false,
                 false,
-                false);
+                false,
+                Pressure);
 
             log.Debug(sql);
             using (MySqlConnection conn = new MySqlConnection(ConfigurationManager.ConnectionStrings["IrrigationController"].ToString()))
