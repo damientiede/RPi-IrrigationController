@@ -27,10 +27,10 @@ namespace GPIOOutputChaser
         const ConnectorPin Station6OutputPin = ConnectorPin.P1Pin33;
         const ConnectorPin Station7OutputPin = ConnectorPin.P1Pin7;
         const ConnectorPin Station8OutputPin = ConnectorPin.P1Pin31;
-        //const ConnectorPin Station9OutputPin = ConnectorPin.P1Pin32;
-        //const ConnectorPin Station10OutputPin = ConnectorPin.P1Pin40;
-        //const ConnectorPin Station11OutputPin = ConnectorPin.P1Pin38;
-        //const ConnectorPin Station12OutputPin = ConnectorPin.P1Pin36;
+        const ConnectorPin Station9OutputPin = ConnectorPin.P1Pin32;
+        const ConnectorPin Station10OutputPin = ConnectorPin.P1Pin40;
+        const ConnectorPin Station11OutputPin = ConnectorPin.P1Pin38;
+        const ConnectorPin Station12OutputPin = ConnectorPin.P1Pin36;
 
         static void Main(string[] args)
         {
@@ -44,11 +44,11 @@ namespace GPIOOutputChaser
                                Station5OutputPin.Output().Name("Led5").Enable(),
                                Station6OutputPin.Output().Name("Led6"),
                                Station7OutputPin.Output().Name("Led7").Enable(),
-                               Station8OutputPin.Output().Name("Led8")
-                               //Station9OutputPin.Output().Name("Led9").Enable(),
-                               //Station10OutputPin.Output().Name("Led10"),
-                               //Station11OutputPin.Output().Name("Led11").Enable(),
-                               //Station12OutputPin.Output().Name("Led12")
+                               Station8OutputPin.Output().Name("Led8"),
+                               Station9OutputPin.Output().Name("Led9").Enable(),
+                               Station10OutputPin.Output().Name("Led10"),
+                               Station11OutputPin.Output().Name("Led11").Enable(),
+                               Station12OutputPin.Output().Name("Led12")
                            };
 
             Console.WriteLine("Chaser Sample: Sample a LED chaser with a switch to change behavior");
@@ -68,7 +68,7 @@ namespace GPIOOutputChaser
             {
                 Loop = true,// args.GetLoop(),
                 RoundTrip = true,// args.GetRoundTrip(),
-                Width = 8,// args.GetWidth(),
+                Width = 12,// args.GetWidth(),
                 Interval = TimeSpan.FromMilliseconds(period)//TimeSpan.FromMilliseconds(args.GetSpeed())
             };
             var switchButton = LowPressureFaultInputPin.Input()
