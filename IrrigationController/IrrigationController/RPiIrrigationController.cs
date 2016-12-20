@@ -11,6 +11,7 @@ using Raspberry.IO.Components.Converters.Mcp3008;
 using log4net;
 using MySql.Data.MySqlClient;
 using IrrigationController.Models;
+using IrrigationController.Data;
 using UnitsNet;
 
 namespace IrrigationController
@@ -47,12 +48,11 @@ namespace IrrigationController
         const ConnectorPin Station5OutputPin = ConnectorPin.P1Pin11;
         const ConnectorPin Station6OutputPin = ConnectorPin.P1Pin33;
         const ConnectorPin Station7OutputPin = ConnectorPin.P1Pin7;
-        //const ConnectorPin Station8OutputPin = ConnectorPin.P1Pin31;
-        const ConnectorPin Station9OutputPin = ConnectorPin.P1Pin32;
+        const ConnectorPin Station8OutputPin = ConnectorPin.P1Pin31;
+        const ConnectorPin PumpOperation = ConnectorPin.P1Pin32;
         const ConnectorPin Station10OutputPin = ConnectorPin.P1Pin40;
-        const ConnectorPin Station11OutputPin = ConnectorPin.P1Pin38;
-        const ConnectorPin Station12OutputPin = ConnectorPin.P1Pin36;
-        const ConnectorPin ResetRelayOutput = ConnectorPin.P1Pin31;
+        const ConnectorPin Station11OutputPin = ConnectorPin.P1Pin38;        
+        const ConnectorPin ResetRelayOutput = ConnectorPin.P1Pin36;
 
         //SPI
         const ConnectorPin adcClock = ConnectorPin.P1Pin23;
@@ -69,10 +69,10 @@ namespace IrrigationController
         bool Station6OutputState = false;
         bool Station7OutputState = false;
         bool Station8OutputState = false;
-        bool Station9OutputState = false;
+        bool PumpOperationOutputState = false;
         bool Station10OutputState = false;
         bool Station11OutputState = false;
-        bool Station12OutputState = false;
+        bool ResetRelayOutputState = false;
         
         public bool LowPressureFault
         {
@@ -157,11 +157,11 @@ namespace IrrigationController
                               Station5OutputPin.Output().Name("Station5"),
                               Station6OutputPin.Output().Name("Station6"),
                               Station7OutputPin.Output().Name("Station7"),
-                              //Station8OutputPin.Output().Name("Station8"),
-                              Station9OutputPin.Output().Name("Station9"),
+                              Station8OutputPin.Output().Name("Station8"),
+                              PumpOperation.Output().Name("Station9"),
                               Station10OutputPin.Output().Name("Station10"),
                               Station11OutputPin.Output().Name("Station11"),
-                              Station12OutputPin.Output().Name("Station12"),
+                              //Station12OutputPin.Output().Name("Station12"),
                               ResetRelayOutput.Output().Name("ResetRelay")
                           };
             GpioConnection connection = new GpioConnection(outputpins);
@@ -281,7 +281,7 @@ namespace IrrigationController
         {            
             var v = referenceVoltage * (double)spiInput.Read().Relative;
             Pressure = Convert.ToInt32(v.Millivolts);
-            if ((Math.Abs(v.Millivolts - volts.Millivolts) > 100))
+            if ((Math.Abs(v.Millivolts - volts.Millivolts) > 500))
             {
                 volts = ElectricPotential.FromMillivolts(v.Millivolts);
                 Console.WriteLine("Pressure: {0}", Pressure);
@@ -305,7 +305,7 @@ namespace IrrigationController
             //Console.WriteLine(msg);
             log.Info(msg);
         }
-        public void CreateEvent(EventType eventType, string desc)
+        public async void CreateEvent(EventType eventType, string desc)
         {
             string sql = string.Format("INSERT INTO EventHistory (TimeStamp, EventType, Description) values (CURRENT_TIMESTAMP(), {0}, '{1}')", (int)eventType, desc);
             log.Debug(sql);
@@ -317,10 +317,27 @@ namespace IrrigationController
                 cmd.ExecuteNonQuery();
                 conn.Close();
             }
+            EventHistory eh = new EventHistory { EventType = (int)eventType, TimeStamp = DateTime.Now, Value = desc };
+            Uri x = await DataAccess.PostEvent(eh);
         }
 
-        public void ProcessCommand()
+        public async void ProcessCommand()
         {
+            //List<PendingCommand> commands = await DataAccess.GetCommands();
+            //foreach (PendingCommand command in commands)
+            //{
+            //    if (command.CommandId == 1)
+            //    {
+            //        //Shutdown
+            //        CommandHistory ch = new CommandHistory()
+            //        {
+            //            Id = command.Id,
+
+            //        }
+            //    }
+            //}
+
+
             IrrigationControllerCommand cmd = GetPendingCommand();
             if (cmd == null)
             {
@@ -348,7 +365,8 @@ namespace IrrigationController
                     break;
             }
 
-        }
+        }       
+
         protected IrrigationControllerCommand GetPendingCommand()
         {
             IrrigationControllerCommand icc = new IrrigationControllerCommand();
@@ -359,16 +377,26 @@ namespace IrrigationController
                 conn.Open();
 
                 MySqlDataReader reader = cmd.ExecuteReader();
-                if (reader.Read())
+                try
                 {
-                    icc.Id = (int)reader["Id"];
-                    icc.CommandId = (int)reader["CommandId"];
-                    icc.Title = reader["Title"].ToString();
-                    icc.Description = reader["Description"].ToString();
-                    icc.Params = reader["Params"].ToString();
-                    icc.Issued = (DateTime)reader["Issued"];
+                    if (reader.Read())
+                    {
+                        icc.Id = (int)reader["Id"];
+                        icc.CommandId = (int)reader["CommandId"];
+                        icc.Title = reader["Title"].ToString();
+                        icc.Description = reader["Description"].ToString();
+                        icc.Params = reader["Params"].ToString();
+                        icc.Issued = (DateTime)reader["Issued"];
+                    }
                 }
-                conn.Close();
+                catch (Exception ex)
+                {
+                    log.Error(ex.Message);
+                }
+                finally
+                {
+                    conn.Close();
+                }
             }
             if (icc.Id > 0)
             {
@@ -377,7 +405,7 @@ namespace IrrigationController
             return null;
 
         }
-        public void RecordStatus()
+        public async void RecordStatus()
         {
             string sql = string.Format("UPDATE ControllerStatus set State = '{0}', Mode = '{1}', TimeStamp = now(), LowPressureFault = {2}, HighPressureFault = {3}, LowWellFault = {4}, OverloadFault = {5}, ResetRelay = {6}, Station1Relay = {7}, Station2Relay = {8}, Station3Relay = {9}, Station4Relay = {10}, Station5Relay = {11}, Station6Relay = {12}, Station7Relay = {13}, Station8Relay = {14}, Station9Relay = {15}, Station10Relay = {16}, Station11Relay = {17}, Station12Relay = {18}, Pressure = {19}",
                 state.ToString(),
@@ -411,6 +439,33 @@ namespace IrrigationController
                 conn.Close();
             }
             dtLastStatusUpdate = DateTime.Now;
+
+            ControllerStatus cs = new ControllerStatus
+            {
+                Id = 0,
+                State = state.ToString(),
+                Mode = "Monitoring",
+                TimeStamp = DateTime.Now,
+                LowPressureFault = 0,//Convert.ToInt32(LowPressureFault),
+                HighPressureFault = 0,//Convert.ToInt32(HighPressureFault),
+                LowWellFault = 0,//Convert.ToInt32(LowWellFault),
+                OverloadFault = 0,//Convert.ToInt32(OverloadFault),
+                ResetRelay = 0,//Convert.ToInt32(ResetRelay),
+                Station1Relay = 0,
+                Station2Relay = 0,
+                Station3Relay = 0,
+                Station4Relay = 0,
+                Station5Relay = 0,
+                Station6Relay = 0,
+                Station7Relay = 0,
+                Station8Relay = 0,
+                Station9Relay = 0,
+                Station10Relay = 0,
+                Station11Relay = 0,
+                Station12Relay = 0,
+                Pressure = Pressure
+            };
+            var x = await DataAccess.PutStatus(cs);
         }
     }
 }
