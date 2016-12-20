@@ -6,11 +6,12 @@ using System.Threading.Tasks;
 
 namespace IrrigationController.Data
 {
-    public class CommandHistory
+    public class PendingCommand
     {
         public int Id;
         public int CommandId;
         public DateTime Issued;
-        public string Params;        
+        public string Params;
+        public string Description;
     }
 }

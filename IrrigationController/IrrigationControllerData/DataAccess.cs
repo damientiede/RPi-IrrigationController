@@ -14,7 +14,7 @@ namespace IrrigationController.Data
         public static async Task<Uri> PutStatus(ControllerStatus cs)
         {
             InitClient();
-            HttpResponseMessage response = await client.PutAsJsonAsync("ControllerStatus", cs);
+            HttpResponseMessage response = await client.PostAsJsonAsync("ControllerStatusUpdate", cs);
             response.EnsureSuccessStatusCode();
 
             // return URI of the created resource.
@@ -40,7 +40,7 @@ namespace IrrigationController.Data
         public static async Task<Uri> PutCommand(CommandHistory ch)
         {
             InitClient();
-            HttpResponseMessage response = await client.PostAsJsonAsync("CommandHistory", ch);
+            HttpResponseMessage response = await client.PostAsJsonAsync("CommandHistoryUpdate", ch);
             response.EnsureSuccessStatusCode();
 
             // return URI of the created resource.
@@ -71,14 +71,14 @@ namespace IrrigationController.Data
             return events;
         }
 
-        public static async Task<List<CommandHistory>> GetCommands()
+        public static async Task<List<PendingCommand>> GetCommands()
         {
             InitClient();
-            List<CommandHistory> commands = null;
+            List<PendingCommand> commands = null;
             HttpResponseMessage response = await client.GetAsync("vwPendingCommands");
             if (response.IsSuccessStatusCode)
             {
-                commands = await response.Content.ReadAsAsync<List<CommandHistory>>();
+                commands = await response.Content.ReadAsAsync<List<PendingCommand>>();
             }
             return commands;
         }
