@@ -54,12 +54,12 @@ namespace GPIOTestHarness
             //var Output3 = Station3OutputPin.Output();
             //var Output4 = Station4OutputPin.Output();
             var pins = new PinConfiguration[]
-                          {
-                              Station1OutputPin.Output().Name("Output1"),
-                              Station2OutputPin.Output().Name("Output2"),
-                              Station3OutputPin.Output().Name("Output3"),
-                              Station4OutputPin.Output().Name("Output4")                             
-                          };
+            {
+                Station1OutputPin.Output().Name("Output1"),
+                Station2OutputPin.Output().Name("Output2"),
+                Station3OutputPin.Output().Name("Output3"),
+                Station4OutputPin.Output().Name("Output4")                             
+            };
             //var settings = new GpioConnectionSettings();
             var connection = new GpioConnection(pins);
 

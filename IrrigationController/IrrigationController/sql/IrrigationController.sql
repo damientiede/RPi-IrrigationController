@@ -137,4 +137,6 @@ INSERT INTO EventType(Id, Name, Description) values (1, 'Application',NULL);
 INSERT INTO EventType(Id, Name, Description) values (2, 'Fault',NULL);
 INSERT INTO EventType(Id, Name, Description) values (3, 'IO',NULL);
 INSERT INTO Command (CommandId, Title, Description) values(1,'Shutdown','Quits the IrrigationController executable');
+
+INSERT INTO ControllerStatus(Id, State) values (1,'Init');
 -- end attached script 'script'

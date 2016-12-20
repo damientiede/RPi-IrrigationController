@@ -9,6 +9,12 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GPIOTestHarness", "GPIOTest
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GPIOOutputChaser", "GPIOOutputChaser\GPIOOutputChaser.csproj", "{35B5F940-3077-47A7-B882-8EC8584125F0}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ApacheWebApp", "ApacheWebApp\ApacheWebApp.csproj", "{55E33545-A3F4-4FC2-9814-2CE790DCF9A1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IrrigationControllerData", "IrrigationControllerData\IrrigationControllerData.csproj", "{DE686EF8-697A-4A21-BBFA-71283CC0A772}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataTestHarness", "DataTestHarness\DataTestHarness.csproj", "{23DDD614-DC7C-4680-B579-125C10637FDA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,6 +33,18 @@ Global
 		{35B5F940-3077-47A7-B882-8EC8584125F0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{35B5F940-3077-47A7-B882-8EC8584125F0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{35B5F940-3077-47A7-B882-8EC8584125F0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{55E33545-A3F4-4FC2-9814-2CE790DCF9A1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{55E33545-A3F4-4FC2-9814-2CE790DCF9A1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{55E33545-A3F4-4FC2-9814-2CE790DCF9A1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{55E33545-A3F4-4FC2-9814-2CE790DCF9A1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DE686EF8-697A-4A21-BBFA-71283CC0A772}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DE686EF8-697A-4A21-BBFA-71283CC0A772}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DE686EF8-697A-4A21-BBFA-71283CC0A772}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DE686EF8-697A-4A21-BBFA-71283CC0A772}.Release|Any CPU.Build.0 = Release|Any CPU
+		{23DDD614-DC7C-4680-B579-125C10637FDA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{23DDD614-DC7C-4680-B579-125C10637FDA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{23DDD614-DC7C-4680-B579-125C10637FDA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{23DDD614-DC7C-4680-B579-125C10637FDA}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
