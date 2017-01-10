@@ -20,9 +20,11 @@ namespace IrrigationController
     {
         ILog log;
         private bool bShutdown;
+        private DateTime dtLastCommandQuery;
         private DateTime dtLastStatusUpdate;
         private DateTime dtFaultStartDate;
         private int MinUpdateIntervalMinutes;
+        private int WebCommandQueryIntervalSeconds;
         private bool bResetRelayState;
         private bool bLowPressureFaultState;
         private bool bHighPressureFaultState;
@@ -125,6 +127,7 @@ namespace IrrigationController
         public IInputAnalogPin spiInput;
 
         protected List<IrrigationControllerCommand> Commands;
+        protected List<PendingCommand> WebCommands;
 
         public RPiIrrigationController()
         {
@@ -142,8 +145,10 @@ namespace IrrigationController
             state = State.Monitor;
             TimeoutDelaySeconds = Convert.ToInt32(ConfigurationManager.AppSettings["TimeoutDelaySeconds"]);            
             MinUpdateIntervalMinutes = Convert.ToInt32(ConfigurationManager.AppSettings["heartbeat"]);
+            WebCommandQueryIntervalSeconds = Convert.ToInt32(ConfigurationManager.AppSettings["CommandQueryInterval"]);
             InitGpio();
 
+            WebCommands = new List<PendingCommand>();
         }
 
         public void InitGpio()
@@ -220,13 +225,11 @@ namespace IrrigationController
 
             connection.Open();
         }
-        public void Monitor()
-        {
+        public async void Monitor()
+        {            
+            
             while (!bShutdown)
-            {
-                //process pending command from CommandHistory
-                ProcessCommand();
-
+            {                
                 //get SPI reading
                 ReadSPI();
 
@@ -268,10 +271,23 @@ namespace IrrigationController
                         break;
                 }
 
+                // retrieve web commands every WebCommandQueryIntervalSeconds seconds
+                if (DateTime.Now > (dtLastCommandQuery.AddSeconds(WebCommandQueryIntervalSeconds)))
+                {                    
+                    //get pending commands from web            
+                    await GetCommands();
+                    //log.DebugFormat("{0} commands queued", WebCommands.Count());
+
+                    //process pending commands from CommandHistory
+                    await ProcessCommands();
+
+                    dtLastCommandQuery = DateTime.Now;
+                }
+
                 if (DateTime.Now > (dtLastStatusUpdate.AddMinutes(MinUpdateIntervalMinutes)))
                 {
                     //heartbeat
-                    RecordStatus();
+                    RecordStatus();                    
                 }
                 Thread.Sleep(100);
             }
@@ -321,52 +337,59 @@ namespace IrrigationController
             Uri x = await DataAccess.PostEvent(eh);
         }
 
-        public async void ProcessCommand()
-        {
-            //List<PendingCommand> commands = await DataAccess.GetCommands();
-            //foreach (PendingCommand command in commands)
-            //{
-            //    if (command.CommandId == 1)
-            //    {
-            //        //Shutdown
-            //        CommandHistory ch = new CommandHistory()
-            //        {
-            //            Id = command.Id,
-
-            //        }
-            //    }
-            //}
-
-
-            IrrigationControllerCommand cmd = GetPendingCommand();
-            if (cmd == null)
+        public async Task GetCommands()
+        {            
+            List<PendingCommand> commands = await DataAccess.GetCommands();
+            if (commands.Count() > 0)
             {
-                return;
+                log.DebugFormat("RPiIrrigationController.GetCommands() {0} commands retrieved", commands.Count());
             }
-
-            Log(string.Format("ProcessCommand(): processing command: {0}", cmd.Title));
-            cmd.SetActioned();
-
-            switch (cmd.CommandId)
-            {
-                case 1:         //SHUTDOWN
-                    CreateEvent(EventType.ApplicationEvent, "Shutdown");
-                    bShutdown = true;
-                    break;
-                case 2:         //MANUAL
-                    break;
-                case 3:         //AUTO
-                    break;
-                case 4:         //STOP PUMP
-                    break;
-                case 5:         //STANDBY
-                    break;
-                default:
-                    break;
+            foreach (PendingCommand command in commands)
+            {                
+                log.DebugFormat("CommandId:{0} Params:{1} Issued:{2} ", command.CommandId, command.Params, command.Issued);
+                WebCommands.Add(command);                
             }
-
         }       
 
+        protected async Task ProcessCommands()
+        {
+            //log.InfoFormat("RPiIrrigationController.ProcessCommands()");
+            if (WebCommands.Count() > 0)
+            {
+                PendingCommand cmd = WebCommands.Last();
+                switch (cmd.CommandId)
+                {
+                    case 1:         //SHUTDOWN
+                        CreateEvent(EventType.ApplicationEvent, "Shutdown");
+                        //bShutdown = true;
+                        break;
+                    case 2:         //MANUAL
+                        break;
+                    case 3:         //AUTO
+                        break;
+                    case 4:         //STOP PUMP
+                        break;
+                    case 5:         //STANDBY
+                        break;
+                    default:
+                        break;
+                }
+
+                CommandHistory ch = new CommandHistory()
+                {
+                    Id = cmd.Id,
+                    CommandId = cmd.CommandId,
+                    Params = cmd.Params,
+                    Issued = cmd.Issued,
+                    Actioned = DateTime.Now
+                };
+                log.DebugFormat("Marking command as actioned: {0}", Newtonsoft.Json.JsonConvert.SerializeObject(ch));
+                var x = await DataAccess.PutCommand(ch);
+
+                WebCommands.Remove(cmd);
+            }
+
+        }
         protected IrrigationControllerCommand GetPendingCommand()
         {
             IrrigationControllerCommand icc = new IrrigationControllerCommand();
