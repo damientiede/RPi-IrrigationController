@@ -10,7 +10,8 @@ namespace IrrigationController.Data
     {
         public int Id;
         public int CommandId;
+        public string Params;
         public DateTime Issued;
-        public string Params;        
+        public DateTime Actioned;
     }
 }

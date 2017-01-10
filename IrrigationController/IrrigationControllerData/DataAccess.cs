@@ -4,11 +4,13 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Web.Script.Serialization;
 using System.Threading.Tasks;
+using log4net;
 
 namespace IrrigationController.Data
 {
     public static class DataAccess
     {
+        static ILog log;
         static HttpClient client = new HttpClient();
         
         public static async Task<Uri> PutStatus(ControllerStatus cs)
@@ -41,6 +43,7 @@ namespace IrrigationController.Data
         {
             InitClient();
             HttpResponseMessage response = await client.PostAsJsonAsync("CommandHistoryUpdate", ch);
+            Console.WriteLine("PutCommand response: {0}", response.StatusCode.ToString());
             response.EnsureSuccessStatusCode();
 
             // return URI of the created resource.
@@ -73,8 +76,10 @@ namespace IrrigationController.Data
 
         public static async Task<List<PendingCommand>> GetCommands()
         {
+            //log.Debug("DataAccess.GetCommands()");
             InitClient();
             List<PendingCommand> commands = null;
+            //Console.WriteLine("Getting commands");
             HttpResponseMessage response = await client.GetAsync("vwPendingCommands");
             if (response.IsSuccessStatusCode)
             {
