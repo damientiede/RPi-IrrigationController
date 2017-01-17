@@ -18,6 +18,8 @@ namespace IrrigationController
 {
     public class RPiIrrigationController
     {
+        #region Declarations
+
         ILog log;
         private bool bShutdown;
         private DateTime dtLastCommandQuery;
@@ -51,10 +53,10 @@ namespace IrrigationController
         const ConnectorPin Station6OutputPin = ConnectorPin.P1Pin33;
         const ConnectorPin Station7OutputPin = ConnectorPin.P1Pin7;
         const ConnectorPin Station8OutputPin = ConnectorPin.P1Pin31;
-        const ConnectorPin PumpOperation = ConnectorPin.P1Pin32;
-        const ConnectorPin Station10OutputPin = ConnectorPin.P1Pin40;
-        const ConnectorPin Station11OutputPin = ConnectorPin.P1Pin38;        
-        const ConnectorPin ResetRelayOutput = ConnectorPin.P1Pin36;
+        const ConnectorPin PumpOperationPin = ConnectorPin.P1Pin32;
+        const ConnectorPin TankRelayOutputPin = ConnectorPin.P1Pin40;
+        const ConnectorPin SpareOutputPin = ConnectorPin.P1Pin38;
+        const ConnectorPin ResetRelayOutputPin = ConnectorPin.P1Pin36;
 
         //SPI
         const ConnectorPin adcClock = ConnectorPin.P1Pin23;
@@ -70,20 +72,41 @@ namespace IrrigationController
         bool Station5OutputState = false;
         bool Station6OutputState = false;
         bool Station7OutputState = false;
-        bool Station8OutputState = false;
+        bool Station8OutputState = false;   //shelter
         bool PumpOperationOutputState = false;
-        bool Station10OutputState = false;
-        bool Station11OutputState = false;
+        bool TankRelayOutputState = false;  //used to supply water from the large H2O tank
+        bool SpareOutputState = false;
         bool ResetRelayOutputState = false;
-        
+
+        GpioConnection connection;
+        PinConfiguration[] outputs;
+        List<Station> stations;
+
+        public enum State { Monitor = 0, WaitForTimeout, ConfirmReset, WaitForReset }
+        public enum Mode { Auto = 0, Manual, Off }
+        public enum EventType { Unknown = 0, ApplicationEvent = 1, FaultEvent = 2, IOEvent = 3 }
+        public State state;
+        public Mode mode;
+        public bool Irrigating;
+        private int TimeoutDelaySeconds;   //timeout delay before reset in seconds
+
+        public ElectricPotential volts = ElectricPotential.FromVolts(0);
+        public ElectricPotential referenceVoltage = ElectricPotential.FromVolts(3.3);
+        public IInputAnalogPin spiInput;
+
+        protected List<IrrigationControllerCommand> Commands;
+        protected List<PendingCommand> WebCommands;
+
+        #endregion
+
         public bool LowPressureFault
         {
-            get { return bLowPressureFaultState; }// ReadPinState(LowPressureFaultInput); }
+            get { return bLowPressureFaultState; }
         }
 
         public bool HighPressureFault
         {
-            get { return bHighPressureFaultState; }// ReadPinState(HighPressureFaultInput); }
+            get { return bHighPressureFaultState; }
         }
 
         public bool LowWellFault
@@ -111,23 +134,13 @@ namespace IrrigationController
                 {
                     Log(string.Format("SetResetButton {0}", value == true ? "On" : "Off"));
                     CreateEvent(EventType.IOEvent, string.Format("Output 6 {0}", value == true ? "On" : "Off"));
-                    
+
                     //LibGpio.Gpio.OutputValue(ResetRelayOutput, value);
                     bResetRelayState = value;
                 }
             }
         }
-        public enum State { Monitor = 0, WaitForTimeout, ConfirmReset, WaitForReset }
-        public enum EventType { Unknown = 0, ApplicationEvent = 1, FaultEvent = 2, IOEvent = 3 }
-        public State state;
-        private int TimeoutDelaySeconds;   //timeout delay before reset in seconds
-
-        public ElectricPotential volts = ElectricPotential.FromVolts(0);
-        public ElectricPotential referenceVoltage = ElectricPotential.FromVolts(3.3);
-        public IInputAnalogPin spiInput;
-
-        protected List<IrrigationControllerCommand> Commands;
-        protected List<PendingCommand> WebCommands;
+        
 
         public RPiIrrigationController()
         {
@@ -143,33 +156,46 @@ namespace IrrigationController
             CreateEvent(EventType.ApplicationEvent, "RPiIrrigationController started");
 
             state = State.Monitor;
-            TimeoutDelaySeconds = Convert.ToInt32(ConfigurationManager.AppSettings["TimeoutDelaySeconds"]);            
+            mode = Mode.Auto;
+            Irrigating = false;
+
+            TimeoutDelaySeconds = Convert.ToInt32(ConfigurationManager.AppSettings["TimeoutDelaySeconds"]);
             MinUpdateIntervalMinutes = Convert.ToInt32(ConfigurationManager.AppSettings["heartbeat"]);
             WebCommandQueryIntervalSeconds = Convert.ToInt32(ConfigurationManager.AppSettings["CommandQueryInterval"]);
-            InitGpio();
 
+            //initialize interface with raspberry pi GPIO
+            InitGpio();            
+
+            //initialize stations
+            stations = new List<Station>();
+            for (int i = 1; i < 9; i++)
+            {
+                Station station = new Station() { Id = i, Name = String.Format("Station{0}", i), OutputState = false };
+                stations.Add(station);
+            }
+
+            AllOutputsOff();
             WebCommands = new List<PendingCommand>();
         }
 
         public void InitGpio()
         {
-            var outputpins = new PinConfiguration[]
-                          {
-                              Station1OutputPin.Output().Name("Station1"),
-                              Station2OutputPin.Output().Name("Station2"),
-                              Station3OutputPin.Output().Name("Station3"),
-                              Station4OutputPin.Output().Name("Station4"),
-                              Station5OutputPin.Output().Name("Station5"),
-                              Station6OutputPin.Output().Name("Station6"),
-                              Station7OutputPin.Output().Name("Station7"),
-                              Station8OutputPin.Output().Name("Station8"),
-                              PumpOperation.Output().Name("Station9"),
-                              Station10OutputPin.Output().Name("Station10"),
-                              Station11OutputPin.Output().Name("Station11"),
-                              //Station12OutputPin.Output().Name("Station12"),
-                              ResetRelayOutput.Output().Name("ResetRelay")
-                          };
-            GpioConnection connection = new GpioConnection(outputpins);
+            outputs = new PinConfiguration[]
+                        {
+                            Station1OutputPin.Output().Name("Station1"),
+                            Station2OutputPin.Output().Name("Station2"),
+                            Station3OutputPin.Output().Name("Station3"),
+                            Station4OutputPin.Output().Name("Station4"),
+                            Station5OutputPin.Output().Name("Station5"),
+                            Station6OutputPin.Output().Name("Station6"),
+                            Station7OutputPin.Output().Name("Station7"),
+                            Station8OutputPin.Output().Name("Station8"),
+                            PumpOperationPin.Output().Name("PumpOperation"),
+                            TankRelayOutputPin.Output().Name("TankRelay"),
+                            SpareOutputPin.Output().Name("Spare"),                              
+                            ResetRelayOutputPin.Output().Name("ResetRelay")
+                        };
+            connection = new GpioConnection(outputs);
 
             connection.Add(LowPressureFaultInputPin.Input().OnStatusChanged(b =>
             {
@@ -184,7 +210,7 @@ namespace IrrigationController
                 Console.WriteLine("HighPressureFaultInput {0}", b ? "on" : "off");
                 bHighPressureFaultState = b;
                 CreateEvent(EventType.IOEvent, string.Format("Input {0} {1}", HighPressureFaultInputPin.ToString(), b ? "on" : "off"));
-                CreateEvent(EventType.FaultEvent, string.Format("High pressure fault {0}",b ? "detected":"cleared"));
+                CreateEvent(EventType.FaultEvent, string.Format("High pressure fault {0}", b ? "detected" : "cleared"));
             }));
 
             connection.Add(LowWellFaultInputPin.Input().OnStatusChanged(b =>
@@ -220,23 +246,44 @@ namespace IrrigationController
                 driver.Out(adcCs),
                 driver.In(adcMiso),
                 driver.Out(adcMosi));
-             
+
             spiInput = spi.In(Mcp3008Channel.Channel0);
 
             connection.Open();
         }
+        
         public async void Monitor()
-        {            
-            
+        {
+
             while (!bShutdown)
-            {                
+            {
                 //get SPI reading
                 ReadSPI();
 
                 switch (state)
                 {
                     case State.Monitor:
-                        //CheckFaultInputs();
+
+                        if (mode == Mode.Manual)
+                        {
+                            //check to see if we are in an irrigation window
+                            if (DateTime.Now > ManualProgram.Start && DateTime.Now < ManualProgram.Start.AddMinutes(ManualProgram.Duration))
+                            {
+                                //check to see that the correct outputs are on
+                                SwitchStation(ManualProgram.StationId);
+                                Irrigating = true;
+                            }
+                            else
+                            {
+                                SwitchStation(0);  //Station 0 - all stations off
+                                Irrigating = false;
+                            }
+                        }
+                        if (mode == Mode.Auto)
+                        {
+                            //check to see if we are in a scheduled irrigation window
+
+                        }
                         break;
 
                     case State.WaitForTimeout:
@@ -271,9 +318,24 @@ namespace IrrigationController
                         break;
                 }
 
+                switch (mode)
+                {
+                    case Mode.Auto:
+
+                        break;
+                    case Mode.Manual:
+
+                        break;
+                    case Mode.Off:
+
+                        break;
+                    default:
+                        break;
+                }
+
                 // retrieve web commands every WebCommandQueryIntervalSeconds seconds
                 if (DateTime.Now > (dtLastCommandQuery.AddSeconds(WebCommandQueryIntervalSeconds)))
-                {                    
+                {
                     //get pending commands from web            
                     await GetCommands();
                     //log.DebugFormat("{0} commands queued", WebCommands.Count());
@@ -287,14 +349,17 @@ namespace IrrigationController
                 if (DateTime.Now > (dtLastStatusUpdate.AddMinutes(MinUpdateIntervalMinutes)))
                 {
                     //heartbeat
-                    RecordStatus();                    
+                    RecordStatus();
                 }
                 Thread.Sleep(100);
             }
-        }        
-        
+
+            //end program            
+            connection.Close();
+        }
+
         public void ReadSPI()
-        {            
+        {
             var v = referenceVoltage * (double)spiInput.Read().Relative;
             Pressure = Convert.ToInt32(v.Millivolts);
             if ((Math.Abs(v.Millivolts - volts.Millivolts) > 500))
@@ -315,6 +380,15 @@ namespace IrrigationController
             CreateEvent(EventType.ApplicationEvent, string.Format("Change state to {0}", newState.ToString()));
             state = newState;
             RecordStatus();
+        }
+        public void SetMode(Mode newMode)
+        {
+            if (mode != newMode)
+            {
+                Log(string.Format("SetMode: {0}", newMode.ToString()));                
+                CreateEvent(EventType.ApplicationEvent, string.Format("Set mode to {0}", newMode.ToString()));
+                mode = newMode;
+            }
         }
         public void Log(string msg)
         {
@@ -338,18 +412,18 @@ namespace IrrigationController
         }
 
         public async Task GetCommands()
-        {            
+        {
             List<PendingCommand> commands = await DataAccess.GetCommands();
             if (commands.Count() > 0)
             {
                 log.DebugFormat("RPiIrrigationController.GetCommands() {0} commands retrieved", commands.Count());
             }
             foreach (PendingCommand command in commands)
-            {                
+            {
                 log.DebugFormat("CommandId:{0} Params:{1} Issued:{2} ", command.CommandId, command.Params, command.Issued);
-                WebCommands.Add(command);                
+                WebCommands.Add(command);
             }
-        }       
+        }
 
         protected async Task ProcessCommands()
         {
@@ -361,15 +435,31 @@ namespace IrrigationController
                 {
                     case 1:         //SHUTDOWN
                         CreateEvent(EventType.ApplicationEvent, "Shutdown");
-                        //bShutdown = true;
+                        AllOutputsOff();
+                        bShutdown = true;
                         break;
-                    case 2:         //MANUAL
+                    case 2:         //Auto
+                        SetMode(Mode.Auto);
                         break;
-                    case 3:         //AUTO
+                    case 3:         //Manual
+                        //Extract the stationid and duration params of the manual command
+                        //eg. 4,60 - station 4 for 60 minutes
+                        string[] parts = cmd.Params.Split(',');
+                        if (parts.Length == 2)
+                        {
+                            int stationid = Convert.ToInt32(parts[0]);
+                            ManualProgram.StationId = stationid;
+                            int duration = Convert.ToInt32(parts[1]);
+                            ManualProgram.Duration = duration;
+                            ManualProgram.Start = DateTime.Now;
+                        }
+                        SetMode(Mode.Manual);
                         break;
-                    case 4:         //STOP PUMP
+                    case 4:         //Off
+                        AllOutputsOff();
+                        SetMode(Mode.Off);
                         break;
-                    case 5:         //STANDBY
+                    case 5:         //GetSchedules
                         break;
                     default:
                         break;
@@ -430,65 +520,148 @@ namespace IrrigationController
         }
         public async void RecordStatus()
         {
-            string sql = string.Format("UPDATE ControllerStatus set State = '{0}', Mode = '{1}', TimeStamp = now(), LowPressureFault = {2}, HighPressureFault = {3}, LowWellFault = {4}, OverloadFault = {5}, ResetRelay = {6}, Station1Relay = {7}, Station2Relay = {8}, Station3Relay = {9}, Station4Relay = {10}, Station5Relay = {11}, Station6Relay = {12}, Station7Relay = {13}, Station8Relay = {14}, Station9Relay = {15}, Station10Relay = {16}, Station11Relay = {17}, Station12Relay = {18}, Pressure = {19}",
-                state.ToString(),
-                "Monitoring",
-                LowPressureFault,
-                HighPressureFault,
-                LowWellFault,
-                OverloadFault,
-                ResetRelay,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                Pressure);
+            //string sql = string.Format("UPDATE ControllerStatus set State = '{0}', Mode = '{1}', TimeStamp = now(), LowPressureFault = {2}, HighPressureFault = {3}, LowWellFault = {4}, OverloadFault = {5}, ResetRelay = {6}, Station1Relay = {7}, Station2Relay = {8}, Station3Relay = {9}, Station4Relay = {10}, Station5Relay = {11}, Station6Relay = {12}, Station7Relay = {13}, Station8Relay = {14}, Station9Relay = {15}, Station10Relay = {16}, Station11Relay = {17}, Station12Relay = {18}, Pressure = {19}",
+            //    state.ToString(),
+            //    mode.ToString(),
+            //    LowPressureFault,
+            //    HighPressureFault,
+            //    LowWellFault,
+            //    OverloadFault,
+            //    ResetRelay,
+            //    false,
+            //    false,
+            //    false,
+            //    false,
+            //    false,
+            //    false,
+            //    false,
+            //    false,
+            //    false,
+            //    false,
+            //    false,
+            //    false,
+            //    Pressure);
 
-            log.Debug(sql);
-            using (MySqlConnection conn = new MySqlConnection(ConfigurationManager.ConnectionStrings["IrrigationController"].ToString()))
-            {
-                MySqlCommand cmd = new MySqlCommand(sql, conn);
-                conn.Open();
+            //log.Debug(sql);
+            //using (MySqlConnection conn = new MySqlConnection(ConfigurationManager.ConnectionStrings["IrrigationController"].ToString()))
+            //{
+            //    MySqlCommand cmd = new MySqlCommand(sql, conn);
+            //    conn.Open();
 
-                cmd.ExecuteNonQuery();
-                conn.Close();
-            }
+            //    cmd.ExecuteNonQuery();
+            //    conn.Close();
+            //}
             dtLastStatusUpdate = DateTime.Now;
 
             ControllerStatus cs = new ControllerStatus
             {
                 Id = 0,
                 State = state.ToString(),
-                Mode = "Monitoring",
+                Mode = mode.ToString(),
                 TimeStamp = DateTime.Now,
-                LowPressureFault = 0,//Convert.ToInt32(LowPressureFault),
-                HighPressureFault = 0,//Convert.ToInt32(HighPressureFault),
-                LowWellFault = 0,//Convert.ToInt32(LowWellFault),
-                OverloadFault = 0,//Convert.ToInt32(OverloadFault),
-                ResetRelay = 0,//Convert.ToInt32(ResetRelay),
-                Station1Relay = 0,
-                Station2Relay = 0,
-                Station3Relay = 0,
-                Station4Relay = 0,
-                Station5Relay = 0,
-                Station6Relay = 0,
-                Station7Relay = 0,
-                Station8Relay = 0,
+                LowPressureFault = Convert.ToInt32(LowPressureFault),
+                HighPressureFault = Convert.ToInt32(HighPressureFault),
+                LowWellFault = Convert.ToInt32(LowWellFault),
+                OverloadFault = Convert.ToInt32(OverloadFault),
+                PumpRelay = Convert.ToInt32(PumpOperationOutputState),
+                ResetRelay = Convert.ToInt32(ResetRelayOutputState),
+                TankRelay = Convert.ToInt32(TankRelayOutputState),
+                Station1Relay = Convert.ToInt32(Station1OutputState),
+                Station2Relay = Convert.ToInt32(Station2OutputState),
+                Station3Relay = Convert.ToInt32(Station3OutputState),
+                Station4Relay = Convert.ToInt32(Station4OutputState),
+                Station5Relay = Convert.ToInt32(Station5OutputState),
+                Station6Relay = Convert.ToInt32(Station6OutputState),
+                Station7Relay = Convert.ToInt32(Station7OutputState),
+                Station8Relay = Convert.ToInt32(Station8OutputState),
                 Station9Relay = 0,
                 Station10Relay = 0,
-                Station11Relay = 0,
-                Station12Relay = 0,
                 Pressure = Pressure
             };
+            log.DebugFormat("Status: {0}", Newtonsoft.Json.JsonConvert.SerializeObject(cs));
             var x = await DataAccess.PutStatus(cs);
+        }
+
+        public void SwitchStation(int stationId)
+        {
+            if (stationId==0)
+            {
+                //switch all stations off
+                AllOutputsOff();
+                return;
+            }
+            foreach(Station station in stations)
+            {
+                if (stationId == station.Id)
+                {
+                    if (!station.OutputState)
+                    {
+                        Log(string.Format("Turning on {0}",station.Name));
+                        connection.Toggle(station.Name);
+                        station.OutputState = true;
+                    }
+                    //for all stations except station 8 (shelter), we activate the pump
+                    //for station 8, we activate the tank relay
+                    if (station.Id == 8)
+                    {
+                        if (!TankRelayOutputState)
+                        {
+                            Log("Turning on tank relay");
+                            connection.Toggle("TankRelay");
+                            TankRelayOutputState = true;
+                        }
+                        if (PumpOperationOutputState)
+                        {
+                            Log("Turning off pump");
+                            connection.Toggle("PumpOperation");
+                            PumpOperationOutputState = false;
+                        }
+                    }
+                    else
+                    {
+                        if (TankRelayOutputState)
+                        {
+                            Log("Turning off tank relay");
+                            connection.Toggle("TankRelay");
+                            TankRelayOutputState = false;
+                        }
+                        if (!PumpOperationOutputState)
+                        {
+                            Log("Turning on pump");
+                            connection.Toggle("PumpOperation");
+                            PumpOperationOutputState = true;
+                        }
+                    }
+                    
+                }
+                else
+                {
+                    if (station.OutputState != false)
+                    {
+                        Log(string.Format("Turning off {0}", station.Name));
+                        connection.Toggle(station.Name);
+                        station.OutputState = false;
+                    }
+                }
+            }
+
+           
+        }
+        public void AllOutputsOff()
+        {
+            //Log("AllOutputsOff()");
+            foreach (Station station in stations)
+            {
+                if (station.OutputState)
+                {
+                    connection.Toggle(station.Name);
+                    station.OutputState = false;
+                }
+            }
+            if (PumpOperationOutputState) { connection.Toggle("PumpOperation"); PumpOperationOutputState = false; }
+            if (TankRelayOutputState) { connection.Toggle("TankRelay"); TankRelayOutputState = false; }
+            if (SpareOutputState) { connection.Toggle("Spare"); SpareOutputState = false; }
+            if (ResetRelayOutputState) { connection.Toggle("ResetRelay"); ResetRelayOutputState = false; }            
         }
     }
 }
