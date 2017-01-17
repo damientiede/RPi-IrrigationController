@@ -42,7 +42,7 @@ namespace IrrigationController.Data
         public static async Task<Uri> PutCommand(CommandHistory ch)
         {
             InitClient();
-            HttpResponseMessage response = await client.PostAsJsonAsync("CommandHistoryUpdate", ch);
+            HttpResponseMessage response = await client.PostAsJsonAsync(string.Format("CommandHistoryUpdate/{0}",ch.Id), ch);
             Console.WriteLine("PutCommand response: {0}", response.StatusCode.ToString());
             response.EnsureSuccessStatusCode();
 

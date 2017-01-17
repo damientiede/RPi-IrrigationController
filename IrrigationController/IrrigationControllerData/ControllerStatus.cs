@@ -18,6 +18,7 @@ namespace IrrigationController.Data
         public int OverloadFault;
         public int ResetRelay;
         public int PumpRelay;
+        public int TankRelay;
         public int Station1Relay;
         public int Station2Relay;
         public int Station3Relay;
@@ -26,10 +27,9 @@ namespace IrrigationController.Data
         public int Station6Relay;
         public int Station7Relay;
         public int Station8Relay;
-        public int Station9Relay;
+        public int Station9Relay;        
         public int Station10Relay;
-        public int Station11Relay;
-        public int Station12Relay;
+        //public int Station12Relay;
         public int Pressure;
     }
 }
