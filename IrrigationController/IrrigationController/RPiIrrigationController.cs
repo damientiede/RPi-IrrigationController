@@ -33,6 +33,7 @@ namespace IrrigationController
         private bool bLowWellFaultState;
         private bool bOverloadFaultState;
         private bool bPushButtonPressedState;
+        private bool bUpdateStatus;
 
         //Input schedule
         const ConnectorPin LowPressureFaultInputPin = ConnectorPin.P1Pin29;
@@ -84,7 +85,7 @@ namespace IrrigationController
 
         public enum State { Monitor = 0, WaitForTimeout, ConfirmReset, WaitForReset }
         public enum Mode { Auto = 0, Manual, Off }
-        public enum EventType { Unknown = 0, ApplicationEvent = 1, FaultEvent = 2, IOEvent = 3 }
+        public enum EventType { Unknown = 0, ApplicationEvent = 1, FaultEvent = 2, IOEvent = 3, Irrigation=4 }
         public State state;
         public Mode mode;
         public bool Irrigating;
@@ -173,9 +174,11 @@ namespace IrrigationController
                 Station station = new Station() { Id = i, Name = String.Format("Station{0}", i), OutputState = false };
                 stations.Add(station);
             }
+            log.Debug("Stations created");
 
             AllOutputsOff();
             WebCommands = new List<PendingCommand>();
+            bUpdateStatus = true;
         }
 
         public void InitGpio()
@@ -254,108 +257,141 @@ namespace IrrigationController
         
         public async void Monitor()
         {
-
-            while (!bShutdown)
+            try
             {
-                //get SPI reading
-                ReadSPI();
+                log.Debug("Starting Monitor()");
 
-                switch (state)
+                while (!bShutdown)
                 {
-                    case State.Monitor:
+                    //get SPI reading
+                    ReadSPI();
 
-                        if (mode == Mode.Manual)
-                        {
-                            //check to see if we are in an irrigation window
-                            if (DateTime.Now > ManualProgram.Start && DateTime.Now < ManualProgram.Start.AddMinutes(ManualProgram.Duration))
+                    switch (state)
+                    {
+                        case State.Monitor:
+
+                            if (mode == Mode.Manual)
                             {
-                                //check to see that the correct outputs are on
-                                SwitchStation(ManualProgram.StationId);
-                                Irrigating = true;
+                                //check to see if we are in an irrigation window
+                                if (ManualProgram.Start != null)
+                                {
+                                    DateTime dtStart = (DateTime)ManualProgram.Start;
+                                    if (DateTime.Now > ManualProgram.Start && DateTime.Now < dtStart.AddMinutes(ManualProgram.Duration))
+                                    {
+                                        //check to see that the correct outputs are on
+                                        SwitchStation(ManualProgram.StationId);
+                                        Irrigating = true;
+                                    }
+                                    else
+                                    {
+                                        if (Irrigating)
+                                        {
+                                            //record end of manual program
+                                            CreateEvent(EventType.Irrigation, string.Format("Manual program end, station:{0} elapsed:{1} minutes", ManualProgram.StationId, (DateTime.Now - dtStart).TotalMinutes));
+                                            bUpdateStatus = true;
+                                        }
+                                        SwitchStation(0);  //Station 0 - all stations off
+                                        Irrigating = false;
+                                        ManualProgram.StationId = 0;
+                                        ManualProgram.Start = null;
+                                        ManualProgram.Duration = 0;
+                                    }
+                                }
                             }
-                            else
+                            if (mode == Mode.Auto)
                             {
-                                SwitchStation(0);  //Station 0 - all stations off
-                                Irrigating = false;
+                                //check to see if we are in a scheduled irrigation window
+
                             }
-                        }
-                        if (mode == Mode.Auto)
-                        {
-                            //check to see if we are in a scheduled irrigation window
+                            break;
 
-                        }
-                        break;
+                        case State.WaitForTimeout:
+                            if (!bLowWellFaultState)
+                            {
+                                ResetRelay = false;
+                                ChangeState(State.Monitor);
+                            }
+                            if (DateTime.Now > dtFaultStartDate.AddSeconds(TimeoutDelaySeconds))
+                            {
+                                ResetRelay = true;
+                                ChangeState(State.ConfirmReset);
+                            }
+                            break;
 
-                    case State.WaitForTimeout:
-                        if (!bLowWellFaultState)
-                        {
-                            ResetRelay = false;
-                            ChangeState(State.Monitor);
-                        }
-                        if (DateTime.Now > dtFaultStartDate.AddSeconds(TimeoutDelaySeconds))
-                        {
-                            ResetRelay = true;
-                            ChangeState(State.ConfirmReset);
-                        }
-                        break;
+                        case State.ConfirmReset:
+                            if (!bLowWellFaultState)
+                            {
+                                ResetRelay = false;
+                                ChangeState(State.Monitor);
+                            }
+                            break;
 
-                    case State.ConfirmReset:
-                        if (!bLowWellFaultState)
-                        {
-                            ResetRelay = false;
-                            ChangeState(State.Monitor);
-                        }
-                        break;
+                        case State.WaitForReset:
+                            if (!InFaultState())
+                            {
+                                ChangeState(State.Monitor);
+                            }
+                            break;
 
-                    case State.WaitForReset:
-                        if (!InFaultState())
-                        {
-                            ChangeState(State.Monitor);
-                        }
-                        break;
+                        default:
+                            break;
+                    }
 
-                    default:
-                        break;
+                    switch (mode)
+                    {
+                        case Mode.Auto:
+
+                            break;
+                        case Mode.Manual:
+
+                            break;
+                        case Mode.Off:
+
+                            break;
+                        default:
+                            break;
+                    }
+
+                    // retrieve web commands every WebCommandQueryIntervalSeconds seconds
+                    if (DateTime.Now > (dtLastCommandQuery.AddSeconds(WebCommandQueryIntervalSeconds)))
+                    {
+                        //get pending commands from web            
+                        await GetCommands();
+                        //log.DebugFormat("{0} commands queued", WebCommands.Count());
+
+                        //process pending commands from CommandHistory
+                        await ProcessCommands();
+
+                        dtLastCommandQuery = DateTime.Now;
+                    }
+
+                    if (DateTime.Now > (dtLastStatusUpdate.AddMinutes(MinUpdateIntervalMinutes)))
+                    {                        
+                        bUpdateStatus = true;
+                    }
+
+                    if (bUpdateStatus)
+                    {
+                        //heartbeat
+                        RecordStatus();
+                        bUpdateStatus = false;
+                        dtLastStatusUpdate = DateTime.Now;
+                    }
+
+                    Thread.Sleep(100);
                 }
 
-                switch (mode)
-                {
-                    case Mode.Auto:
-
-                        break;
-                    case Mode.Manual:
-
-                        break;
-                    case Mode.Off:
-
-                        break;
-                    default:
-                        break;
-                }
-
-                // retrieve web commands every WebCommandQueryIntervalSeconds seconds
-                if (DateTime.Now > (dtLastCommandQuery.AddSeconds(WebCommandQueryIntervalSeconds)))
-                {
-                    //get pending commands from web            
-                    await GetCommands();
-                    //log.DebugFormat("{0} commands queued", WebCommands.Count());
-
-                    //process pending commands from CommandHistory
-                    await ProcessCommands();
-
-                    dtLastCommandQuery = DateTime.Now;
-                }
-
-                if (DateTime.Now > (dtLastStatusUpdate.AddMinutes(MinUpdateIntervalMinutes)))
-                {
-                    //heartbeat
-                    RecordStatus();
-                }
-                Thread.Sleep(100);
             }
-
-            //end program            
-            connection.Close();
+            catch (Exception ex)
+            {
+                Log(ex.Message);
+            }
+            finally
+            {
+                //end program            
+                connection.Close();
+                log.Info("Shutting down");
+            }
         }
 
         public void ReadSPI()
@@ -379,7 +415,7 @@ namespace IrrigationController
             Log(string.Format("ChangeState {0}", newState.ToString()));
             CreateEvent(EventType.ApplicationEvent, string.Format("Change state to {0}", newState.ToString()));
             state = newState;
-            RecordStatus();
+            bUpdateStatus = true; 
         }
         public void SetMode(Mode newMode)
         {
@@ -413,15 +449,21 @@ namespace IrrigationController
 
         public async Task GetCommands()
         {
-            List<PendingCommand> commands = await DataAccess.GetCommands();
-            if (commands.Count() > 0)
-            {
-                log.DebugFormat("RPiIrrigationController.GetCommands() {0} commands retrieved", commands.Count());
+            try {
+                List<PendingCommand> commands = await DataAccess.GetCommands();
+                if (commands.Count() > 0)
+                {
+                    log.DebugFormat("RPiIrrigationController.GetCommands() {0} commands retrieved", commands.Count());
+                }
+                foreach (PendingCommand command in commands)
+                {
+                    log.DebugFormat("CommandId:{0} Params:{1} Issued:{2} ", command.CommandId, command.Params, command.Issued);
+                    WebCommands.Add(command);
+                }
             }
-            foreach (PendingCommand command in commands)
+            catch (Exception ex)
             {
-                log.DebugFormat("CommandId:{0} Params:{1} Issued:{2} ", command.CommandId, command.Params, command.Issued);
-                WebCommands.Add(command);
+                log.ErrorFormat("GetCommands(): {0}",ex.Message);
             }
         }
 
@@ -436,7 +478,7 @@ namespace IrrigationController
                     case 1:         //SHUTDOWN
                         CreateEvent(EventType.ApplicationEvent, "Shutdown");
                         AllOutputsOff();
-                        bShutdown = true;
+                        bShutdown = true;                        
                         break;
                     case 2:         //Auto
                         SetMode(Mode.Auto);
@@ -453,7 +495,17 @@ namespace IrrigationController
                             ManualProgram.Duration = duration;
                             ManualProgram.Start = DateTime.Now;
                         }
+                        if (mode == Mode.Manual && Irrigating)
+                        {
+                            //Need record the end of existing program first
+                            CreateEvent(EventType.Irrigation, string.Format("Manual stop, station:{0} elapsed:{1} minutes", ManualProgram.StationId, getElapsed().ToString("N2")));
+                        }
+
                         SetMode(Mode.Manual);
+
+                        //Record start of new manual program
+                        CreateEvent(EventType.Irrigation, string.Format("Manual start, station:{0} duration:{1} minutes", ManualProgram.StationId, ManualProgram.Duration));
+
                         break;
                     case 4:         //Off
                         AllOutputsOff();
@@ -474,9 +526,17 @@ namespace IrrigationController
                     Actioned = DateTime.Now
                 };
                 log.DebugFormat("Marking command as actioned: {0}", Newtonsoft.Json.JsonConvert.SerializeObject(ch));
-                var x = await DataAccess.PutCommand(ch);
+                try
+                {
+                    var x = await DataAccess.PutCommand(ch);
+                }
+                catch (Exception ex)
+                {
+                    log.ErrorFormat("ProcessCommands(): {0}", ex.Message);
+                }
 
                 WebCommands.Remove(cmd);
+                bUpdateStatus = true; 
             }
 
         }
@@ -550,8 +610,7 @@ namespace IrrigationController
 
             //    cmd.ExecuteNonQuery();
             //    conn.Close();
-            //}
-            dtLastStatusUpdate = DateTime.Now;
+            //}            
 
             ControllerStatus cs = new ControllerStatus
             {
@@ -566,20 +625,68 @@ namespace IrrigationController
                 PumpRelay = Convert.ToInt32(PumpOperationOutputState),
                 ResetRelay = Convert.ToInt32(ResetRelayOutputState),
                 TankRelay = Convert.ToInt32(TankRelayOutputState),
-                Station1Relay = Convert.ToInt32(Station1OutputState),
-                Station2Relay = Convert.ToInt32(Station2OutputState),
-                Station3Relay = Convert.ToInt32(Station3OutputState),
-                Station4Relay = Convert.ToInt32(Station4OutputState),
-                Station5Relay = Convert.ToInt32(Station5OutputState),
-                Station6Relay = Convert.ToInt32(Station6OutputState),
-                Station7Relay = Convert.ToInt32(Station7OutputState),
-                Station8Relay = Convert.ToInt32(Station8OutputState),
+                Station1Relay = Convert.ToInt32(stations[0].OutputState),
+                Station2Relay = Convert.ToInt32(stations[1].OutputState),
+                Station3Relay = Convert.ToInt32(stations[2].OutputState),
+                Station4Relay = Convert.ToInt32(stations[3].OutputState),
+                Station5Relay = Convert.ToInt32(stations[4].OutputState),
+                Station6Relay = Convert.ToInt32(stations[5].OutputState),
+                Station7Relay = Convert.ToInt32(stations[6].OutputState),
+                Station8Relay = Convert.ToInt32(stations[7].OutputState),
                 Station9Relay = 0,
                 Station10Relay = 0,
                 Pressure = Pressure
             };
-            log.DebugFormat("Status: {0}", Newtonsoft.Json.JsonConvert.SerializeObject(cs));
-            var x = await DataAccess.PutStatus(cs);
+            log.DebugFormat("ControllerStatus: {0}", Newtonsoft.Json.JsonConvert.SerializeObject(cs));
+            try
+            {
+                var x = await DataAccess.PutControllerStatus(cs);
+            }
+            catch(Exception ex)
+            {
+                log.ErrorFormat("RecordStatus():{0}", ex.Message);
+            }
+
+            string sState = "Off";
+            if (InFaultState()) { sState = "Fault"; } else if (Irrigating) { sState = "Irrigating"; }
+            Status status = new Status()
+            {
+                Id = 0,
+                State = sState,
+                Mode = mode.ToString(),
+                TimeStamp = DateTime.Now,
+                Pressure = Pressure,
+                Station = ManualProgram.StationId,
+                Start = ManualProgram.Start,
+                Duration = ManualProgram.Duration,
+                Inputs = string.Format("{0}{1}{2}{3}",
+                        Convert.ToInt32(LowPressureFault),
+                        Convert.ToInt32(HighPressureFault),
+                        Convert.ToInt32(LowWellFault),
+                        Convert.ToInt32(OverloadFault)),
+                Outputs = string.Format("{0}{1}{2}{3}{4}{5}{6}{7}{8}{9}{10}",
+                        Convert.ToInt32(PumpOperationOutputState),                        
+                        Convert.ToInt32(TankRelayOutputState),
+                        Convert.ToInt32(stations[0].OutputState),
+                        Convert.ToInt32(stations[1].OutputState),
+                        Convert.ToInt32(stations[2].OutputState),
+                        Convert.ToInt32(stations[3].OutputState),
+                        Convert.ToInt32(stations[4].OutputState),
+                        Convert.ToInt32(stations[5].OutputState),
+                        Convert.ToInt32(stations[6].OutputState),
+                        Convert.ToInt32(stations[7].OutputState),
+                        Convert.ToInt32(ResetRelayOutputState))
+            };
+            log.DebugFormat("Status: {0}", Newtonsoft.Json.JsonConvert.SerializeObject(status));
+            try
+            {
+                var x = await DataAccess.PutStatus(status);
+            }
+            catch (Exception ex)
+            {
+                log.ErrorFormat("RecordStatus():{0}", ex.Message);
+            }
+
         }
 
         public void SwitchStation(int stationId)
@@ -596,9 +703,10 @@ namespace IrrigationController
                 {
                     if (!station.OutputState)
                     {
-                        Log(string.Format("Turning on {0}",station.Name));
+                        Log(string.Format("Turning on Station{0} OutputState:{1}",station.Name,station.OutputState));
                         connection.Toggle(station.Name);
                         station.OutputState = true;
+                        bUpdateStatus = true;
                     }
                     //for all stations except station 8 (shelter), we activate the pump
                     //for station 8, we activate the tank relay
@@ -609,12 +717,14 @@ namespace IrrigationController
                             Log("Turning on tank relay");
                             connection.Toggle("TankRelay");
                             TankRelayOutputState = true;
+                            bUpdateStatus = true;
                         }
                         if (PumpOperationOutputState)
                         {
                             Log("Turning off pump");
                             connection.Toggle("PumpOperation");
                             PumpOperationOutputState = false;
+                            bUpdateStatus = true;
                         }
                     }
                     else
@@ -624,12 +734,14 @@ namespace IrrigationController
                             Log("Turning off tank relay");
                             connection.Toggle("TankRelay");
                             TankRelayOutputState = false;
+                            bUpdateStatus = true;
                         }
                         if (!PumpOperationOutputState)
                         {
                             Log("Turning on pump");
                             connection.Toggle("PumpOperation");
                             PumpOperationOutputState = true;
+                            bUpdateStatus = true;
                         }
                     }
                     
@@ -638,11 +750,13 @@ namespace IrrigationController
                 {
                     if (station.OutputState != false)
                     {
-                        Log(string.Format("Turning off {0}", station.Name));
+                        Log(string.Format("Turning off Station{0} OutputState:{1}", station.Name,station.OutputState));
                         connection.Toggle(station.Name);
                         station.OutputState = false;
+                        bUpdateStatus = true;
                     }
                 }
+                Irrigating = true;
             }
 
            
@@ -661,7 +775,18 @@ namespace IrrigationController
             if (PumpOperationOutputState) { connection.Toggle("PumpOperation"); PumpOperationOutputState = false; }
             if (TankRelayOutputState) { connection.Toggle("TankRelay"); TankRelayOutputState = false; }
             if (SpareOutputState) { connection.Toggle("Spare"); SpareOutputState = false; }
-            if (ResetRelayOutputState) { connection.Toggle("ResetRelay"); ResetRelayOutputState = false; }            
+            if (ResetRelayOutputState) { connection.Toggle("ResetRelay"); ResetRelayOutputState = false; }
+            Irrigating = false;
+        }
+
+        public double getElapsed()
+        {
+            if (ManualProgram.Start == null)
+            {
+                return -1;
+            }
+            DateTime dtStart = (DateTime)ManualProgram.Start;
+            return (DateTime.Now - dtStart).TotalMinutes;
         }
     }
 }
