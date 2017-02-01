@@ -13,7 +13,7 @@ namespace IrrigationController.Data
         static ILog log;
         static HttpClient client = new HttpClient();
         
-        public static async Task<Uri> PutStatus(ControllerStatus cs)
+        public static async Task<Uri> PutControllerStatus(ControllerStatus cs)
         {
             InitClient();
             HttpResponseMessage response = await client.PostAsJsonAsync("ControllerStatusUpdate", cs);
@@ -22,7 +22,17 @@ namespace IrrigationController.Data
             // return URI of the created resource.
             return response.Headers.Location;
         }
-        
+
+        public static async Task<Uri> PutStatus(Status status)
+        {
+            InitClient();
+            HttpResponseMessage response = await client.PostAsJsonAsync("StatusUpdate", status);
+            response.EnsureSuccessStatusCode();
+
+            // return URI of the created resource.
+            return response.Headers.Location;
+        }
+
         public static void InitClient()
         {
             client.BaseAddress = new Uri("http://www.creepytree.co.nz/IrrigationController/api.php/");

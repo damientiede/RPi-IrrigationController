@@ -9,7 +9,7 @@ namespace IrrigationController.Data
     public static class ManualProgram
     {
         public static int StationId;
-        public static DateTime Start;
+        public static DateTime? Start;
         public static int Duration;
     }
 }
