@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using log4net;
 
 namespace IrrigationController
 {
@@ -10,9 +11,17 @@ namespace IrrigationController
     {
         static void Main(string[] args)
         {
-            RPiIrrigationController ctrl = new RPiIrrigationController();
-            ctrl.Monitor();
-
+            log4net.Config.XmlConfigurator.Configure();
+            ILog log = LogManager.GetLogger("Controller");
+            try
+            {
+                RPiIrrigationController ctrl = new RPiIrrigationController();
+                ctrl.Monitor();
+            }
+            catch (Exception ex)
+            {
+                log.ErrorFormat(ex.Message);
+            }        
         }
     }
 }
